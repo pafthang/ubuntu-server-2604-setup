@@ -8,28 +8,29 @@ source "$SCRIPT_DIR/config.env"
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a   # needrestart рестартует сервисы сам, без TUI
 log() { echo ">>> $*"; }
 
-# Страховка от запуска вслепую: без ключа этот скрипт запрещает себе работу
-[[ -s /root/.ssh/authorized_keys ]] || {
-    echo "!! /root/.ssh/authorized_keys пуст. Сначала 20-ssh-access.sh и проверка входа!" >&2; exit 1;
-}
-
 apt-get install -y ufw fail2ban python3-systemd unattended-upgrades needrestart
 
 # --- sshd: drop-in конфиг ------------------------------------------
+# Аутентификацию сознательно НЕ трогаем: ключи и запрет паролей задаёт
+# провижининг при создании сервера. Действующие значения показываются
+# в финальной сводке — тихий дрейф остаётся видимым.
 NEW_PORT="${SSH_PORT:-22}"
 CUR_PORT="$( (sshd -T 2>/dev/null || true) | awk '/^port /{print $2; exit}')"
 CUR_PORT="${CUR_PORT:-22}"
 
 cat > /etc/ssh/sshd_config.d/60-hardening.conf <<EOF
 Port ${NEW_PORT}
-PermitRootLogin prohibit-password
-PasswordAuthentication no
-KbdInteractiveAuthentication no
 X11Forwarding no
 MaxAuthTries 3
 LoginGraceTime 30
 ClientAliveInterval 600
 ClientAliveCountMax 2
+
+# Если образ провайдера всё же НЕ настроил вход только по ключу,
+# включите вручную — убедившись, что текущая сессия поднята по ключу:
+#PermitRootLogin prohibit-password
+#PasswordAuthentication no
+#KbdInteractiveAuthentication no
 EOF
 sshd -t   # синтаксис проверяем ДО любых изменений сети
 
@@ -108,28 +109,24 @@ fi
 
 # --- сводка ---------------------------------------------------------
 log "Финальная сводка:"
+# passwordauthentication/permitrootlogin показываем как есть — чтобы видеть,
+# что именно оставил провижининг (скрипт их контролировать перестал)
 sshd -T | grep -E '^(port|passwordauthentication|permitrootlogin) '
 ufw status verbose | head -5
 fail2ban-client status sshd | grep -E 'Currently banned|Total banned' || true
 swapon --show || true
 
 SERVER_IP="$(hostname -I | awk '{print $1}')"
+CONNECT_HINT="ssh root@${SERVER_IP}"
+[[ "$NEW_PORT" != 22 ]] && CONNECT_HINT="ssh -p ${NEW_PORT} root@${SERVER_IP}" || true
+
 cat <<EOF
 
 ✅ Hardening применён.
-Проверьте в НОВОМ окне терминала оба пункта:
-  ssh -p ${NEW_PORT} root@${SERVER_IP}
-        → впускает молча, без пароля
-  ssh -o PubkeyAuthentication=no root@${SERVER_IP}
-        → сразу "Permission denied (publickey)", пароль НЕ запрашивается
-          (сервер его больше не предлагает)
-
-Если порт меняли — обновите его в ~/.ssh/config на локальной машине:
-
-  Host myserver
-      HostName ${SERVER_IP}
-      User root
-      Port ${NEW_PORT}
+Подключение:  ${CONNECT_HINT}
+Если порт меняли — обновите его в ~/.ssh/config на локальной машине.
+Методы входа (см. выше passwordauthentication/permitrootlogin) управляются
+провижинингом, этот скрипт их не менял.
 
 Следующий шаг, который здесь не автоматизирован осознанно:
 бэкапы ВНЕ этого сервера (restic/borg). Это важнее любого пунктa выше.
