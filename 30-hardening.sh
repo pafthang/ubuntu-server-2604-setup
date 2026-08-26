@@ -102,7 +102,7 @@ if [[ "${CREATE_SWAP:-false}" == "true" ]] && ! swapon --show --noheadings | gre
         chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
         grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
         echo 'vm.swappiness=10' > /etc/sysctl.d/99-swappiness.conf
-        sysctl -q -p /etc/sysctx.d/99-swappiness.conf 2>/dev/null || sysctl -q -p /etc/sysctl.d/99-swappiness.conf
+        sysctl -q -p /etc/sysctl.d/99-swappiness.conf
     fi
 fi
 
@@ -113,14 +113,21 @@ ufw status verbose | head -5
 fail2ban-client status sshd | grep -E 'Currently banned|Total banned' || true
 swapon --show || true
 
+SERVER_IP="$(hostname -I | awk '{print $1}')"
 cat <<EOF
 
 ✅ Hardening применён.
-Вход теперь ТОЛЬКО:  ssh -p ${NEW_PORT} root@$(hostname -I | awk '{print $1}')
+Проверьте в НОВОМ окне терминала оба пункта:
+  ssh -p ${NEW_PORT} root@${SERVER_IP}
+        → впускает молча, без пароля
+  ssh -o PubkeyAuthentication=no root@${SERVER_IP}
+        → сразу "Permission denied (publickey)", пароль НЕ запрашивается
+          (сервер его больше не предлагает)
+
 Если порт меняли — обновите его в ~/.ssh/config на локальной машине:
 
   Host myserver
-      HostName <ip>
+      HostName ${SERVER_IP}
       User root
       Port ${NEW_PORT}
 
