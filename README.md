@@ -20,7 +20,7 @@
 Безопаснее — скачать, посмотреть и запустить:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<YOU>/infra-bootstrap/main/bootstrap.sh \
+curl -fsSL https://raw.githubusercontent.com/pafthang/ubuntu-server-2604-setup/main/bootstrap.sh \
   -o bootstrap.sh && sudo bash bootstrap.sh all \
   --key-url https://github.com/<YOU>.keys --port 22
 ```
@@ -28,12 +28,12 @@ curl -fsSL https://raw.githubusercontent.com/<YOU>/infra-bootstrap/main/bootstra
 Компактнее, но канал не проверяете:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<YOU>/infra-bootstrap/main/bootstrap.sh \
-  | sudo bash -s -- all --key-url https://github.com/<YOU>.keys
+curl -fsSL https://raw.githubusercontent.com/pafthang/ubuntu-server-2604-setup/main/bootstrap.sh \
+  | sudo bash -s -- all --key-url https://github.com/pafthang.keys
 ```
 
 > ⚠️ Для воспроизводимости подставьте в URL хэш коммита вместо `main`:
-> `.../<YOU>/infra-bootstrap/<commit-sha>/bootstrap.sh`.
+> `.../pafthang/infra-bootstrap/ubuntu-server-2604-setup/bootstrap.sh`.
 > Тогда состояние сервера никогда не зависит от будущих правок ветки.
 
 #### Что произойдёт
