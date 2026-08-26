@@ -5,17 +5,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$SCRIPT_DIR/config.env" ]] || { echo "Нет config.env" >&2; exit 1; }
 source "$SCRIPT_DIR/config.env"
 [[ $EUID -eq 0 ]] || { echo "Запускайте от root: sudo $0" >&2; exit 1; }
-export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a   # needrestart рестартует сервисы сам, без TUI
 log() { echo ">>> $*"; }
 
-apt-get install -y ufw fail2ban python3-systemd unattended-upgrades needrestart
+# Страховка одиночного запуска: этап предполагает свежие списки пакетов.
+# Если до нас отработал 10-packages.sh — обновление вырождается в секунды.
+apt-get update
+# openssh-server включён сознательно: обычно уже есть, но если образ минимальный —
+# лучше поставить явно, чем получить понятный отказ от `sshd -t` ниже.
+apt-get install -y ufw fail2ban python3-systemd unattended-upgrades needrestart openssh-server
 
 # --- sshd: drop-in конфиг ------------------------------------------
 # Аутентификацию сознательно НЕ трогаем: её задаёт провижининг при создании.
+# Приоритет порта: SSH_PORT_FORCE (CLI bootstrap) > SSH_PORT (config.env/env) > 22.
 # MaxAuthTries 6 (дефолт), а не ниже: при ssh-агенте с пачкой ключей строгий
 # лимит обрубает перебор ДО правильного ключа ("Too many authentication
 # failures"). От брутфорса защищает fail2ban, а не эта цифра.
-NEW_PORT="${SSH_PORT:-22}"
+NEW_PORT="${SSH_PORT_FORCE:-${SSH_PORT:-22}}"
 CUR_PORT="$( (sshd -T 2>/dev/null || true) | awk '/^port /{print $2; exit}')"
 CUR_PORT="${CUR_PORT:-22}"
 
@@ -33,22 +39,30 @@ ClientAliveCountMax 2
 #PasswordAuthentication no
 #KbdInteractiveAuthentication no
 EOF
-sshd -t
+sshd -t   # синтаксис проверяем ДО любых изменений сети
 
 # --- fail2ban: ваш IP вне подозрений ---------------------------------
 # Агрессивный режим считает провалами и preauth-обрывы; если вы гоняли
 # проверки без ключа, свежестартовавший fail2ban способен забанить сам
 # источник прогона. Игнорируем IP, откуда прилетела установка.
+# NB: SSH_CONNECTION пуст при запуске из локальной консоли/VNC — тогда строки нет,
+# и это нормально.
 CLIENT_IP=""
 [[ -n "${SSH_CONNECTION:-}" ]] && CLIENT_IP="$(cut -d' ' -f1 <<<"$SSH_CONNECTION")"
 
 mkdir -p /etc/fail2ban/jail.d
 {
     echo "[DEFAULT]"
-    [[ -n "$CLIENT_IP" ]] && echo "ignoreip = 127.0.0.1/8 ::1 ${CLIENT_IP}"
+    # НЕ через `[[ ]] && echo` последней строкой группы: при пустом CLIENT_IP
+    # группа возвратила бы ненулевой статус и под set -e убила скрипт.
+    if [[ -n "$CLIENT_IP" ]]; then
+        echo "ignoreip = 127.0.0.1/8 ::1 ${CLIENT_IP}"
+    fi
 } > /etc/fail2ban/jail.d/00-ignoreip.local
 
 # --- порядок операций вокруг порта критичен --------------------------
+# Правило нового порта добавляем ДО переключения sshd, чтобы разрывов не было;
+# живые установленные соединения UFW не режет (state ESTABLISHED в conntrack).
 ufw default deny incoming
 ufw default allow outgoing
 ufw limit "${NEW_PORT}/tcp" comment 'SSH'
@@ -93,7 +107,7 @@ systemctl enable fail2ban >/dev/null
 systemctl restart fail2ban
 
 # Разбан источника установки: снимает возможный запрет, накопленный
-# предыдущими прогонами/тестами (idempotent: несуществующий бан — не ошибка)
+# предыдущими прогонами/тестами (несуществующий бан — не ошибка)
 if [[ -n "$CLIENT_IP" ]]; then
     fail2ban-client set sshd unbanip "$CLIENT_IP" >/dev/null 2>&1 || true
 fi
@@ -141,7 +155,18 @@ fi
 
 # --- сводка -----------------------------------------------------------
 log "Финальная сводка:"
-sshd -T | grep -E '^(port|passwordauthentication|permitrootlogin) '
+# Одним вызовом: и для показа, и для последующих проверок
+SSHD_EFF="$(sshd -T)"
+echo "$SSHD_EFF" | grep -E '^(port|maxauthtries|passwordauthentication|permitrootlogin) '
+
+# Наш drop-in аутентификацию больше не принуждает — только показывает.
+# Если фактическое состояние «пароли включены», кричим об этом прямо здесь.
+if grep -q '^passwordauthentication yes' <<<"$SSHD_EFF"; then
+    log "⚠️ passwordauthentication=yes — провижининг оставил парольный вход!"
+    log "   Закройте вручную: раскомментируйте три строки в"
+    log "   /etc/ssh/sshd_config.d/60-hardening.conf, затем: systemctl restart ssh"
+fi
+
 ufw status verbose | head -5
 fail2ban-client status sshd
 swapon --show || true

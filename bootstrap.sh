@@ -70,7 +70,7 @@ fi
 if [[ -n "$DIR" && -f "$DIR/10-packages.sh" ]]; then
     log "Использую локальные файлы этапов из $DIR"
 else
-    STAGE="$(mktemp -d /tmp/infra-bootstrap.XXXXXX)"
+    STAGE="$(mktemp -d /tmp/ubuntu-server-2604-setup.XXXXXX)"
     log "Этапы не найдены рядом со скриптом — скачиваю в $STAGE"
     for f in 10-packages.sh 20-hardening.sh; do
         curl -fSL --retry 3 "$REPO_BASE/$f" -o "$STAGE/$f" \

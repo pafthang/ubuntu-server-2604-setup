@@ -22,8 +22,6 @@ log()  { echo ">>> $*"; }
 tool() { command -v "$1" >/dev/null; }
 
 # --- архитектура ---------------------------------------------------
-# Определяем ДО любых изменений: падаем сразу и понятно на экзотике,
-# а не посреди установки с полусобранной системой.
 BIN_ARCH=""
 case "$(dpkg --print-architecture)" in
     amd64) BIN_ARCH="x86_64" ;;
@@ -40,8 +38,6 @@ apt-get update
 apt-get upgrade -y
 
 # === 2. Пакеты из репозитория ======================================
-# ufw/fail2ban сознательно НЕ здесь: ставятся в 30-hardening.sh вместе
-# со своей конфигурацией (свежий fail2ban без настройки сыплет ошибками).
 PACKAGES=(
     # сеть и диагностика
     curl wget git rsync jq
@@ -61,16 +57,9 @@ PACKAGES=(
 log "Установка пакетов (--no-install-recommends)..."
 apt-get install -y --no-install-recommends "${PACKAGES[@]}"
 
-# ВАЖНО: jq установлен строками выше и используется ниже (версии релизов
-# через GitHub API) — порядок фаз гарантирует его наличие к этому моменту.
+# jq установлен выше и используется ниже (GitHub API) — порядок фаз гарантирует наличие
 
-# === 3. Инструменты вне apt: apt -> snap -> официальный бинарник ====
-# Легенда деградации осознанная: сначала родной репозиторий (обновляется
-# с системой), потом snap, напоследок статический бинарник с GitHub
-# (автоопределение свежайшей версии — ничего не устаревает в коде).
-# Попытки больше НЕ глушатся: ошибка каждой ноги видна в терминале.
-# Именно слепые редиректы однажды превратили аварию в немую загадку.
-
+# === 3. Инструменты вне apt ========================================
 install_zellij() {
     local ver
     ver="$(curl -fsSL https://api.github.com/repos/zellij-org/zellij/releases/latest | jq -r .tag_name)"
@@ -84,8 +73,6 @@ install_zellij() {
 }
 
 install_micro() {
-    # getmic.ro сам определяет платформу и кладёт binary в текущий каталог —
-    # изолируем во временную папку, чтобы не сорить в /tmp
     log "micro: скачивание официальным установщиком..."
     mkdir -p /tmp/micro-install
     ( cd /tmp/micro-install && curl -fsSL https://getmic.ro | bash )
@@ -106,10 +93,10 @@ install_helix() {
     rm -f /tmp/helix.tar.xz
     ln -sf /opt/helix/hx /usr/local/bin/hx
     log "helix ${ver}: установлен"
-    HX_SOURCE="tarball"   # конфиг рантайма нужен ТОЛЬКО при этом способе — см. ниже
+    HX_SOURCE="tarball"
 }
 
-SNAP_TIMEOUT=120   # snapd на свежих машинах «seed'ится» — даём минуты, не вечность
+SNAP_TIMEOUT=120
 
 log "Установка zellij..."
 tool zellij || {
@@ -124,7 +111,7 @@ tool micro || {
         || install_micro
 }
 
-HX_SOURCE="repo"   # дефолт: если поставился из apt/snap — системный рантайм корректен
+HX_SOURCE="repo"
 log "Установка helix..."
 tool hx || {
     apt-get install -y helix \
@@ -133,6 +120,20 @@ tool hx || {
 }
 
 # === 4. Конфигурация ===============================================
+
+# --- fish как login-shell для root ---------------------------------
+# Сам chsh идемпотентен, но проверяем явно: повторный прогон даёт «уже fish»,
+# а не лишнее телодвижение. Путь дублируем в /etc/shells — некоторые PAM-стеки
+# и утилиты типа usermod сверяются с ним даже для root.
+FISH_BIN="$(command -v fish)"
+CURRENT_SHELL="$(getent passwd root | cut -d: -f7)"
+if [[ "$CURRENT_SHELL" == "$FISH_BIN" ]]; then
+    log "Login-shell root уже fish (${FISH_BIN})"
+else
+    grep -qxF "$FISH_BIN" /etc/shells || echo "$FISH_BIN" >> /etc/shells
+    chsh -s "$FISH_BIN" root
+    log "Login-shell root: ${CURRENT_SHELL} → ${FISH_BIN} (вступит в силу со СЛЕДУЮЩЕГО логина)"
+fi
 
 log "Редактор по умолчанию — micro (bash и fish, sudoedit/git/crontab)..."
 echo 'export EDITOR=micro VISUAL=micro SUDO_EDITOR=micro' > /etc/profile.d/50-editor.sh
@@ -148,9 +149,6 @@ EOF
 update-alternatives --install /usr/bin/editor editor "$(command -v micro)" 100 >/dev/null
 update-alternatives --set editor "$(command -v micro)"
 
-# Рантайм helix указываем только когда он реально лежит в /opt/helix.
-# При установке через apt/snap переопределение сломало бы поиск tree-sitter
-# парсеров (они живут в собственном префиксе пакета)!
 if [[ "$HX_SOURCE" == "tarball" ]]; then
     log "HELIX_RUNTIME → /opt/helix/runtime (установка тарболлом)"
     cat > /etc/fish/conf.d/40-helix-runtime.fish <<'EOF'
@@ -158,8 +156,6 @@ set -gx HELIX_RUNTIME /opt/helix/runtime
 EOF
 fi
 
-# Интеграция fzf c fish встроена начиная с fzf 0.48; в репозиториях 24.04+
-# версия достаточно свежая — проверка --fish страхует старые системы.
 cat > /etc/fish/conf.d/90-fzf.fish <<'EOF'
 if status is-interactive; and type -q fzf; and fzf --fish >/dev/null 2>&1
     fzf --fish | source
