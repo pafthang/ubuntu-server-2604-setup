@@ -52,14 +52,14 @@ sudo bash /tmp/bootstrap.sh all
 С нестандартным портом SSH:
 
 ```bash
-sudo bash /tmp/bootstrap.sh all --port 2222
+sudo bash /tmp/bootstrap.sh all
 ```
 
 Компактнее, но канал не проверяете:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pafthang/ubuntu-server-2604-setup/main/bootstrap.sh \
-  | sudo bash -s -- all --port 2222
+  | sudo bash -s -- all
 ```
 
 Оба варианта равнозначны по результату: во втором скрипт сам скачивает этапы
