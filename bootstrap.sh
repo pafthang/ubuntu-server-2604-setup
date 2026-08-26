@@ -139,12 +139,18 @@ if (( SKIP_GATE )); then
     log "--skip-gate: проверка входа пропущена (допустимо только в тестах/CI!)"
     confirmed=1
 else
+    LAST_TICK=$SECONDS
     while (( SECONDS < GATE_TIMEOUT )); do
         if journalctl --quiet --since "@$GATE_SINCE" 2>/dev/null \
              | grep -q 'Accepted publickey'; then
             confirmed=1
             log "✓ Зарегистрирован успешный вход по ключу"
             break
+        fi
+        if (( SECONDS - LAST_TICK >= 30 )); then
+            LAST_TICK=$SECONDS
+            echo "[bootstrap] …жду ШАГ 1 (вход по ключу): ${PORT_HINT}  (${SECONDS}/${GATE_TIMEOUT} сек)"
+            echo "[bootstrap]   шаг 2 из баннера (отказ доступа) гейт НЕ двигает — он для вашей собственной проверки"
         fi
         sleep 5
     done
