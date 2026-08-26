@@ -1,4 +1,4 @@
-# ubuntu-server-2604-setup
+#ubuntu server 2604 setup
 
 Первичная настройка чистого Ubuntu Server (24.04+, включая 26.04)
 одной командой или тремя шагами:
